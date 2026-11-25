@@ -92,3 +92,10 @@ using the **regenie** [Github repository](https://github.com/rgcgithub/regenie/i
 [Version 3.0](https://github.com/rgcgithub/regenie/releases/tag/v3.0) (New gene-based tests: SKAT, SKATO, ACATV, ACATO and NNLS [Non-Negative Least Square test]; New GxE and GxG interaction testing functionality; New conditional analysis functionality; see [release page](https://github.com/rgcgithub/regenie/releases/tag/v3.0) for minor additions)
 
 For past releases, see [here](RELEASE_LOG.md).
+
+## Contributors to this fork
+
+The `fix/condition-ultra-rare-collapse` branch (option `--condition-MACthr` to collapse ultra-rare conditioning variants into a single mask covariate, a separation check for conditioning covariates with binary traits, and a clearer error when the null logistic regression fails) was contributed by:
+
+- Shelley ([@shiyuzhang0522](https://github.com/shiyuzhang0522))
+- Claude (Anthropic), AI coding assistant
