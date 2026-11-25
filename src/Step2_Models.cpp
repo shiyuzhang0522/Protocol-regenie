@@ -991,6 +991,16 @@ void fit_null_firth(bool const& silent, int const& chrom, struct f_ests* firth_e
   ArrayXb has_converged = params->pheno_pass; // if null log reg converged
   IOFormat Fmt(StreamPrecision, DontAlignCols, " ", "\n", "", "","","");
 
+  // if the null logistic regression already failed for all phenotypes, Firth is never attempted
+  if(!params->pheno_pass.any() && params->pheno_fail_nullreg.all()) {
+    string msg = "null logistic regression failed to converge for all phenotypes (null Firth model was not fitted). "
+      "This is often due to covariates with complete separation";
+    if(params->condition_snps)
+      msg += " (e.g. ultra-rare conditioning variants carried only by cases or only by controls; "
+        "consider using `--condition-MACthr` to collapse them into a single mask or removing them from `--condition-list`)";
+    throw msg + ".";
+  }
+
   if(!silent && params->firth) sout << "   -fitting null Firth logistic regression on binary phenotypes..." << flush;
 
   // get starting values

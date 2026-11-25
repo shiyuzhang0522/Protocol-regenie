@@ -194,6 +194,9 @@ struct param {
   bool transposedPheno = false, tpheno_iid_only = false;
   bool condition_snps = false, condition_file = false;
   uint32_t max_condition_vars = 10000;
+  int condition_collapse_MAC = 0; // collapse conditioning variants with MAC <= this into a single mask covariate (0 = off)
+  int condition_cov_start = -1, condition_cov_n = 0; // position/number of conditioning covariate columns in new_cov
+  std::vector<std::string> condition_cov_names; // names of conditioning covariate columns
   int sex_specific = 0; // 0 = all; 1 = male-only; 2=female-only
 
   // filters 

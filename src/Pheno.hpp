@@ -63,6 +63,8 @@ void print_cox_info(struct param*,struct in_files*,struct phenodt*,std::vector<s
 void check_nvals(int const&,std::string const&,struct param const*,struct phenodt const*);
 void extract_interaction_snp(struct param*,struct in_files*,struct filter*,struct phenodt*,struct geno_block*,Eigen::Ref<ArrayXb>,mstream&);
 void extract_condition_snps(struct param*,struct in_files*,struct filter*,struct phenodt*,struct geno_block*,Eigen::Ref<ArrayXb>,mstream&);
+void collapse_condition_snps(struct param*,struct in_files const*,struct phenodt*,const Eigen::Ref<const ArrayXb>&,mstream&);
+void check_condition_separation(struct param*,struct in_files const*,struct phenodt*,mstream&);
 int check_categories(std::vector<std::string>&,std::vector<std::map<std::string,int>>&,struct param*,struct filter*,mstream&);
 Eigen::MatrixXd get_dummies(const Eigen::Ref<const Eigen::ArrayXd>&);
 bool add_square_term(const Eigen::Ref<const Eigen::MatrixXd>&);

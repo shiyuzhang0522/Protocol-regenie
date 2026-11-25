@@ -102,6 +102,10 @@ void read_pheno_and_cov(struct in_files* files, struct param* params, struct fil
   setMasks(params, filters, pheno_data, sout);
   sout << " * number of individuals used in analysis = " << params->n_analyzed << endl;
 
+  // collapse ultra-rare conditioning variants into a single mask
+  if(params->condition_snps)
+    collapse_condition_snps(params, files, pheno_data, filters->ind_in_analysis, sout);
+
   // check P vs N
   if(pheno_data->new_cov.cols() >= params->n_samples)
     throw "Number of covariates is greater than sample size!";
@@ -974,11 +978,157 @@ void extract_condition_snps(struct param* params, struct in_files* files, struct
 
   }
 
-  if(params->print_cov_betas) { // save SNP names
-    for (itr = filters->condition_snp_names.begin(); itr != filters->condition_snp_names.end(); ++itr) 
-      params->covar_names.push_back(itr->first);
+  // keep track of the conditioning covariate columns (used for collapsing & separation checks)
+  params->condition_cov_start = ncols;
+  params->condition_cov_n = ncov_snps;
+  params->condition_cov_names.resize(0);
+  for (itr = filters->condition_snp_names.begin(); itr != filters->condition_snp_names.end(); ++itr)
+    params->condition_cov_names.push_back(itr->first);
+
+  if(params->print_cov_betas) // save SNP names
+    params->covar_names.insert(params->covar_names.end(), params->condition_cov_names.begin(), params->condition_cov_names.end());
+
+}
+
+// collapse ultra-rare conditioning variants (MAC <= --condition-MACthr) into a single mask covariate
+// (same approach as for ultra-rare variants in SKAT/ACAT tests: max rule after aligning to the minor allele)
+void collapse_condition_snps(struct param* params, struct in_files const* files, struct phenodt* pheno_data, const Ref<const ArrayXb>& ind_in_analysis, mstream& sout) {
+
+  if((params->condition_collapse_MAC <= 0) || (params->condition_cov_n == 0)) return;
+
+  int start = params->condition_cov_start, ncond = params->condition_cov_n;
+  int ntot = pheno_data->new_cov.cols(), nright = ntot - start - ncond;
+  double N = ind_in_analysis.count(), sum_g, mac;
+  ArrayXd maskd = ind_in_analysis.cast<double>();
+  ArrayXd ur_mask = ArrayXd::Zero(pheno_data->new_cov.rows());
+  vector<int> keep_cols;
+  vector<string> keep_names, ur_names, mono_names;
+  vector<double> ur_macs;
+
+  if(N < 1) return;
+
+  for(int j = 0; j < ncond; j++){
+
+    MapArXd g (pheno_data->new_cov.col(start + j).data(), pheno_data->new_cov.rows());
+    sum_g = (g * maskd).sum();
+    bool flip = (sum_g / (2 * N)) > 0.5;
+    mac = flip ? (2 * N - sum_g) : sum_g;
+
+    if(mac < 0.5) { // monomorphic in analyzed samples (would be absorbed by the intercept)
+      mono_names.push_back(params->condition_cov_names[j]);
+    } else if(mac <= params->condition_collapse_MAC) { // ultra-rare -> collapse using max rule
+      if(flip) ur_mask = ur_mask.max((2 - g) * maskd);
+      else ur_mask = ur_mask.max(g * maskd);
+      ur_names.push_back(params->condition_cov_names[j]);
+      ur_macs.push_back(mac);
+    } else {
+      keep_cols.push_back(start + j);
+      keep_names.push_back(params->condition_cov_names[j]);
+    }
   }
-  
+
+  sout << "   -collapsing conditioning variants with MAC <= " << params->condition_collapse_MAC << " into a single mask\n";
+  if(ur_names.empty() && mono_names.empty()) {
+    sout << "     +no ultra-rare conditioning variants found (all " << ncond << " variants kept as separate covariates)\n";
+    return;
+  }
+
+  bool with_ur = !ur_names.empty();
+  int nkeep = keep_cols.size(), new_ncond = nkeep + (with_ur ? 1 : 0);
+  string ur_name = "condition_UR_mask";
+
+  // rebuild covariate matrix: [left covs | kept conditioning variants | UR mask | right covs]
+  MatrixXd new_cov (pheno_data->new_cov.rows(), start + new_ncond + nright);
+  new_cov.leftCols(start) = pheno_data->new_cov.leftCols(start);
+  for(int j = 0; j < nkeep; j++)
+    new_cov.col(start + j) = pheno_data->new_cov.col(keep_cols[j]);
+  if(with_ur) new_cov.col(start + nkeep) = ur_mask.matrix();
+  if(nright > 0) new_cov.rightCols(nright) = pheno_data->new_cov.rightCols(nright);
+  pheno_data->new_cov = std::move(new_cov);
+
+  // update names
+  if(with_ur) keep_names.push_back(ur_name);
+  if(params->print_cov_betas) { // covar_names is aligned with columns of new_cov
+    vector<string> new_names(params->covar_names.begin(), params->covar_names.begin() + start);
+    new_names.insert(new_names.end(), keep_names.begin(), keep_names.end());
+    new_names.insert(new_names.end(), params->covar_names.begin() + start + ncond, params->covar_names.end());
+    params->covar_names = new_names;
+  }
+  params->condition_cov_names = keep_names;
+  params->condition_cov_n = new_ncond;
+
+  // report
+  if(!mono_names.empty())
+    sout << "     +ignoring " << mono_names.size() << " conditioning variants which are monomorphic in the analyzed samples\n";
+  if(with_ur) {
+    int n_carriers = ((ur_mask >= 0.5) && ind_in_analysis).count();
+    sout << "     +" << ur_names.size() << " ultra-rare conditioning variants collapsed into covariate '" << ur_name
+      << "' (number of carriers = " << n_carriers << ")\n";
+  }
+  sout << "     +number of conditioning covariates used = " << new_ncond << " (" << nkeep << " single variants"
+    << (with_ur ? " + 1 ultra-rare mask" : "") << ")\n";
+
+  // write list of collapsed/ignored variants
+  string fname = files->out_file + "_condition_UR_mask.snplist";
+  Files fout;
+  fout.openForWrite(fname, sout);
+  fout << "ID\tMAC\tSTATUS\n";
+  for(size_t i = 0; i < ur_names.size(); i++)
+    fout << ur_names[i] << "\t" << ur_macs[i] << "\tcollapsed\n";
+  for(size_t i = 0; i < mono_names.size(); i++)
+    fout << mono_names[i] << "\t0\tmonomorphic\n";
+  fout.closeFile();
+  sout << "     +list of collapsed variants written to [" << fname << "]\n";
+
+}
+
+// check whether conditioning covariates show complete separation for binary traits
+// (carriers of the minor allele are all cases or all controls) which makes the null logistic regression diverge
+void check_condition_separation(struct param* params, struct in_files const* files, struct phenodt* pheno_data, mstream& sout) {
+
+  if((params->trait_mode != 1) || (params->condition_cov_n == 0)) return;
+
+  int start = params->condition_cov_start, max_print = 20;
+  ArrayXd g;
+
+  for(int ph = 0; ph < params->n_pheno; ph++){
+
+    if( !params->pheno_pass(ph) ) continue;
+
+    MapArXd Y (pheno_data->phenotypes_raw.col(ph).data(), pheno_data->phenotypes_raw.rows());
+    MapArXb mask (pheno_data->masked_indivs.col(ph).data(), pheno_data->masked_indivs.rows());
+    double N = mask.count();
+    if(N < 1) continue;
+    vector<string> sep_info;
+
+    for(int j = 0; j < params->condition_cov_n; j++){
+
+      g = pheno_data->new_cov.col(start + j).array();
+      // align to minor allele
+      if( (mask.select(g, 0).sum() / (2 * N)) > 0.5 ) g = 2 - g;
+      ArrayXb carrier = mask && (g >= 0.5);
+      int n_case = (carrier && (Y > 0.5)).count(), n_ctrl = (carrier && (Y < 0.5)).count();
+      bool is_sep = ((n_case + n_ctrl) > 0) && ((n_case == 0) || (n_ctrl == 0));
+      bool is_mask = (params->condition_cov_names[j] == "condition_UR_mask");
+
+      if(is_mask)
+        sout << "   -conditioning covariate '" << params->condition_cov_names[j] << "' for phenotype '" << files->pheno_names[ph]
+          << "': " << n_case << " case carriers and " << n_ctrl << " control carriers\n";
+
+      if(is_sep)
+        sep_info.push_back(params->condition_cov_names[j] + " (cases=" + to_string(n_case) + ",controls=" + to_string(n_ctrl) + ")");
+    }
+
+    if(sep_info.empty()) continue;
+
+    sout << "   WARNING: " << sep_info.size() << " conditioning covariate(s) show complete separation for phenotype '" << files->pheno_names[ph]
+      << "' (minor allele carriers are only cases or only controls) which can cause the null logistic regression to not converge:\n";
+    for(size_t i = 0; (i < sep_info.size()) && ((int)i < max_print); i++)
+      sout << "     " << sep_info[i] << "\n";
+    if((int)sep_info.size() > max_print) sout << "     ... (" << sep_info.size() - max_print << " more)\n";
+    sout << "     Consider collapsing ultra-rare conditioning variants with `--condition-MACthr` or removing these variants from `--condition-list`.\n";
+
+  }
 
 }
 
@@ -1068,6 +1218,10 @@ void prep_run (struct in_files* files, struct filter* filters, struct param* par
 
   // compute N for each trait
   setMasks(params, filters, pheno_data, sout);
+
+  // check for separation with conditioning variants (BTs)
+  if(params->condition_snps && !params->getCorMat)
+    check_condition_separation(params, files, pheno_data, sout);
 
   // for interaction test with BTs, add E^2 to covs
   if( (params->trait_mode==1) && params->w_interaction && params->gwas_condtl ) {

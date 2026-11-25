@@ -275,6 +275,7 @@ void read_params_and_check(int& argc, char *argv[], struct param* params, struct
     ("skip-dosage-comp", "skip dosage compensation for males in chrX non-PAR regions")
     ("maxCatLevels", "maximum number of levels for categorical covariates", cxxopts::value<int>(params->max_cat_levels),"INT(=10)")
     ("max-condition-vars", "maximum number of variants to include as covariates", cxxopts::value<uint32_t>(params->max_condition_vars),"INT(=10000)")
+    ("condition-MACthr", "collapse conditioning variants with MAC at or below this threshold into a single mask covariate (0 = no collapsing)", cxxopts::value<int>(params->condition_collapse_MAC),"INT(=0)")
     ("nb", "number of blocks to use", cxxopts::value<int>(params->n_block),"INT")
     ("starting-block", "start run at a specific block/set number for step 2", cxxopts::value<int>(params->start_block),"INT")
     ("force-step1", "run step 1 for more than 1M variants (not recommended)")
@@ -1158,6 +1159,10 @@ void read_params_and_check(int& argc, char *argv[], struct param* params, struct
       throw "cannot use both --extract-or and --exclude-or.";
     if(params->condition_file && !params->condition_snps )
       throw "must use --condition-list if using --condition-file.";
+    if(vm.count("condition-MACthr") && !params->condition_snps )
+      throw "must use --condition-list if using --condition-MACthr.";
+    if(params->condition_collapse_MAC < 0)
+      throw "--condition-MACthr must be non-negative.";
     if(params->interaction_file && !params->interaction_snp )
       throw "must use --interaction-snp if using --interaction-file.";
     if( !vm.count("covarFile") && vm.count("interaction") && !vm.count("interaction-snp") )

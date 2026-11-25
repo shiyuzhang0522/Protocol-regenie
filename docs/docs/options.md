@@ -770,6 +770,20 @@ The conditioning variants will automatically be ignored from the analysis.
 |`--condition-file `| FORMAT,FILE| Optional| get conditioning variants from external file (same argument format as `--interaction-file`)|
 |`--condition-file-sample `| FILE| Optional| accompagnying sample file for BGEN format|
 |`--max-condition-vars `| INT| Optional| maximum number of conditioning variants [default is 10,000]|
+|`--condition-MACthr `| INT| Optional| collapse conditioning variants with MAC at or below this threshold into a single mask covariate [default is 0, i.e. no collapsing]|
+
+Ultra-rare conditioning variants can make the null model unstable, especially for binary traits:
+if the carriers of a variant are all cases or all controls (complete separation), the null logistic
+regression does not converge. With `--condition-MACthr`, conditioning variants with MAC at or below
+the threshold (computed in the analyzed samples) are combined into a single covariate `condition_UR_mask`.
+This uses the same approach as for ultra-rare variants in the SKAT/ACAT tests: each genotype is first
+aligned to the minor allele, then the per-sample maximum is taken across variants. The remaining
+conditioning variants are kept as separate covariates, and variants that are monomorphic in the
+analyzed samples are dropped. The collapsed and dropped variants are listed in `<out>_condition_UR_mask.snplist`.
+The mask is estimated like any other covariate, and its effect is reported with `--print-cov-betas`.
+
+For binary traits, the number of case and control carriers of `condition_UR_mask` is printed in the log.
+A warning lists any conditioning covariate whose minor allele carriers are all cases or all controls.
 
 ## Survival analyses
 
